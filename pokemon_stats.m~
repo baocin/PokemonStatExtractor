@@ -1,0 +1,78 @@
+
+
+function [ID, CP, HP, stardust, level, cir_center] = pokemon_stats ()
+%img, model
+img = imread('val/
+% Please DO NOT change the interface
+% INPUT: image; model(a struct that contains your classification model, detector, template, etc.)
+% OUTPUT: ID(pokemon id, 1-201); level(the position(x,y) of the white dot in the semi circle); cir_center(the position(x,y) of the center of the semi circle)
+
+persistent i;
+if (isempty(i))
+    i = 0;
+end
+i = i + 1;
+
+persistent hmi;
+if (isempty(hmi))
+hmi = vision.MarkerInserter('Size', 100, ...
+    'Fill', true, 'FillColor', 'Black', 'Opacity', 1);
+end
+persistent htm;
+if (isempty(htm))
+htm=vision.TemplateMatcher( 'SearchMethod', 'Three-step');
+end
+
+% Replace these with your code
+ID = 1;
+CP = 123;
+HP = 26;
+stardust = 600;
+level = [327,165];
+cir_center = [355,457];
+
+maskImage = im2bw(imread('mask.bmp'));
+dustImage = rgb2gray(imread('dust.bmp'));
+editImage = imread('edit.bmp');
+
+%Resize the mask to fit the current image
+inImageSize = size(img);
+% a = size(maskImage)
+maskImage = imresize(maskImage, [ inImageSize(1) inImageSize(2) ]);
+
+
+maskedRGBImage = bsxfun(@times, img, cast(maskImage, 'like', img));
+maskedGrayImage = rgb2gray(maskedRGBImage);
+
+% Find Dust 
+Loc = step(htm, maskedGrayImage, dustImage)
+level = Loc;
+
+[mserRegions] = detectMSERFeatures(maskedGrayImage, ...
+    'RegionAreaRange',[30 100],'ThresholdDelta',12);
+
+
+figure
+imshow(maskedGrayImage)
+hold on
+plot(mserRegions, 'showPixelList', true,'showEllipses',false)
+title('MSER regions')
+hold off
+savefig('mask/figs/im.fig');
+
+% J = step(hmi, maskedImage, Loc);
+
+% level = C;
+% C = xcorr2(single(maskedRGBImage), single(dustImage))
+
+imwrite(maskedGrayImage, sprintf('mask/gray/maskedImage%d.png', i));
+imwrite(maskedRGBImage, sprintf('mask/RGB/maskedImage%d.png', i));
+
+% imshow(maskedRGBImage); title('Template');
+% figure; imshow(J); title('Marked target');
+
+% exit()
+
+end
+
+
