@@ -18,7 +18,7 @@ CP = zeros(img_num,1);
 HP = zeros(img_num,1);
 stardust = zeros(img_num,1);
 
-for i = 1:1%img_num
+for i = 1:5%img_num
     
     close all;
     
@@ -34,10 +34,10 @@ for i = 1:1%img_num
     
     [ID(i), CP(i), HP(i), stardust(i), level, cir_center] = pokemon_stats (img, model);
     
-    imshow(rgb2gray(img)); hold on;
-    plot(level(1),level(2),'b*');
-    plot(cir_center(1),cir_center(2),'g^');
-    
+%     imshow(rgb2gray(img)); hold on;
+%     plot(level(1),level(2),'b*');
+%     plot(cir_center(1),cir_center(2),'g^');
+%     
     pause(5);
     
 end
