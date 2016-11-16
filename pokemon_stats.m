@@ -18,8 +18,8 @@ i = i + 1;
 
 % Replace these with your code
 ID = 1;
-CP = 123;
-HP = 26;
+CP = 10;
+HP = 40;
 stardust = 600;
 level = [327,165];
 cir_center = [355,457];
@@ -42,6 +42,8 @@ editTemplate = rgb2gray(imread('edit.bmp'));
 slashTemplate = imread('slash.bmp');
 %Template of the text "HP"
 hpTemplate = imread('HP.bmp');
+%Template of the text "P" in CP
+cpTemplate = imread('CP.bmp');
 
 %Resize the mask to fit the current image
 pokeMask = imresize(pokeMask, [ inImageSize(1) inImageSize(2) ]);
@@ -67,24 +69,33 @@ cir_center(1) = round(inImageSize(2)/2) * sizeRatio(1);
 cir_center(2) = round(cornerPoint(1) + oneThirdRow - (one100thRow*3)) * sizeRatio(2);
 
 %--------------------------  Detect Dust ---------------------------
-% dustLocation = template_match(dustTemplate, bottomThird);
-% %Found the dust icon, now get the text region next to it
-% dustStartRow = round(dustLocation(1));
-% dustEndRow = round(dustLocation(1) + size(dustTemplate,1));
-% dustStartCol = round(dustLocation(2) + size(dustTemplate, 2) * 1.2);
-% dustEndCol = round(dustLocation(2) + size(dustTemplate,2) + (inImageSize(2) * 0.12));
-% bottomThird = textDetectionImage((oneThirdRow*2):end, :);
-% dustTextRegion = bottomThird(dustStartRow:dustEndRow, dustStartCol:dustEndCol);
+bottomThird = textDetectionImage((oneThirdRow*2):end, :);
+dustLocation = template_match(dustTemplate, bottomThird);
+%Found the dust icon, now get the text region next to it
+dustStartRow = round(dustLocation(1));
+dustEndRow = round(dustLocation(1) + size(dustTemplate,1));
+dustStartCol = round(dustLocation(2) + size(dustTemplate, 2) * 1.2);
+dustEndCol = round(dustLocation(2) + size(dustTemplate,2) + (inImageSize(2) * 0.12));
+dustTextRegion = bottomThird(dustStartRow:dustEndRow, dustStartCol:dustEndCol);
 
 %--------------------------  Detect HP ---------------------------
 startRow = (cornerPoint(1) + oneThirdRow + (one100thRow * 10));
-endRow = (inImageSize(1)-(oneSixthRow*2) - (one100thRow * 10))
+endRow = (inImageSize(1)-(oneSixthRow*2) - (one100thRow * 10));
 middleThird = textDetectionImage(startRow:endRow, :);
 hpLocation = template_match(slashTemplate, middleThird);
 %Extract the text region
 hpStartRow = round(hpLocation(1));
 hpEndRow = round(hpLocation(1) + size(slashTemplate,1) * 1.4);
 hpTextRegion = middleThird(hpStartRow:hpEndRow, :);
+
+%--------------------------  Detect CP ---------------------------
+cpGeneralRegion = textDetectionImage(1:oneSixthRow, :);
+cpLocation = template_match(cpTemplate, cpGeneralRegion);
+cpStartRow = cpLocation(1) - (one100thRow * 2);
+cpEndRow = cpStartRow + (one100thRow * 6);
+cpStartCol = cpLocation(2) + size(cpTemplate,2) * 1.2;
+cpEndCol = cpStartCol + oneTenthCol*2.5;
+cpTextRegion = cpGeneralRegion(cpStartRow:cpEndRow, cpStartCol:cpEndCol);
 
 % %Find Edit
 % editLocation = template_match(editTemplate, middleThird);
@@ -104,13 +115,14 @@ hpTextRegion = middleThird(hpStartRow:hpEndRow, :);
 %(splits the 
 
 %--------------------------  Testing ---------------------------
-  hFig = figure;
-  hAx  = axes;
-  imshow(hpTextRegion);
+%   hFig = figure;
+%   hAx  = axes;
+%     figure; imshow(cpGeneralRegion);
+%    figure;imshow(cpTextRegion);
 %   hold on;
-%   plot(cir_center(1),cir_center(2),'b*');
+%   plot(cpLocation(1),cpLocation(2),'b*');
 %   hold off;
-  pause(3);
+%    pause(10);
 
 imwrite(maskedGrayImage, sprintf('mask/gray/maskedImage%d.png', i));
 imwrite(middleThird, sprintf('mask/edge/edge%d.png', i));
@@ -126,10 +138,10 @@ function [ position ] = template_match(template, background)
     yoffSet = ypeak-size(template,1);
     xoffSet = xpeak-size(template,2);
     
-      hFig = figure;
-      hAx  = axes;
-      imshow(background,'Parent', hAx);
-       imrect(hAx, [xoffSet+1, yoffSet+1, size(template,2), size(template,1)]);
+%        hFig = figure;
+%        hAx  = axes;
+%        imshow(background,'Parent', hAx);
+%         imrect(hAx, [xoffSet+1, yoffSet+1, size(template,2), size(template,1)]);
 %     
     position = [ yoffSet xoffSet ];
 end

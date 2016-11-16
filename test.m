@@ -38,7 +38,7 @@ for i = 1:img_num
 %       plot(level(1),level(2),'b*');
 %       plot(cir_center(1),cir_center(2),'g^');
 %     
-pause(2);
+% pause(2);
     
 end
 
