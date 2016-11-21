@@ -1,5 +1,3 @@
-
-
 function [ID, CP, HP, stardust, level, cir_center] = pokemon_stats (img, model)
 
 %img, model
@@ -15,6 +13,25 @@ if (isempty(i))
     i = 0;
 end
 i = i + 1;
+
+load('observationLabels.mat');
+load('observations.mat');
+
+
+assignin('base', 'observations', observations);
+assignin('base', 'observationLabels', observationLabels);
+% 
+% persistent observations;
+% persistent observationLabels;
+% persistent expected;
+% persistent data;
+% 
+% if (isempty(observations))
+%    observations = [];%zeros(10,59);
+%    observationLabels = [];
+%    expected = [];
+%    data = table;
+% end
 
 % Replace these with your code
 ID = 1;
@@ -78,6 +95,15 @@ dustStartCol = round(dustLocation(2) + size(dustTemplate, 2) * 1.2);
 dustEndCol = round(dustLocation(2) + size(dustTemplate,2) + (inImageSize(2) * 0.12));
 dustTextRegion = bottomThird(dustStartRow:dustEndRow, dustStartCol:dustEndCol);
 
+
+figure; imshow(dustTextRegion);
+dustTextRegion = imcomplement(dustTextRegion);
+
+dustTextRegion = imbinarize(dustTextRegion);
+
+figure; imshow(dustTextRegion);
+croppedDust= cropCharacters(dustTextRegion);
+
 %--------------------------  Detect HP ---------------------------
 startRow = (cornerPoint(1) + oneThirdRow + (one100thRow * 10));
 endRow = (inImageSize(1)-(oneSixthRow*2) - (one100thRow * 10));
@@ -88,6 +114,9 @@ hpStartRow = round(hpLocation(1));
 hpEndRow = round(hpLocation(1) + size(slashTemplate,1) * 1.4);
 hpTextRegion = middleThird(hpStartRow:hpEndRow, :);
 
+hpTextRegion = imcomplement(imbinarize(hpTextRegion));
+croppedHP = cropCharacters(hpTextRegion);
+
 %--------------------------  Detect CP ---------------------------
 cpGeneralRegion = textDetectionImage(1:oneSixthRow, :);
 cpLocation = template_match(cpTemplate, cpGeneralRegion);
@@ -97,36 +126,58 @@ cpStartCol = cpLocation(2) + size(cpTemplate,2) * 1.2;
 cpEndCol = cpStartCol + oneTenthCol*2.5;
 cpTextRegion = cpGeneralRegion(cpStartRow:cpEndRow, cpStartCol:cpEndCol);
 
+cpTextRegion = imbinarize(cpTextRegion);
+croppedCP = cropCharacters(cpTextRegion);
+
+% stardust = 0;
+stardustStrings = [];
+% disp(size(croppedDust, 2))
+for i = 1 : size(croppedDust, 2)
+% %     exampleNumber = size(observations, 1) + 1
+%    figure; imshow(croppedDust{i});
+% %    ws = watershed(croppedDust{i});
+% %    figure; 
+% % %    pause(1);
+% % %    close all;
+% % %     assignin('base','ex', croppedDust{i});
+%     feat = feature_extraction(croppedDust{i}); %[ nums.examples; feature_extraction(croppedDust{i}) ];
+%     disp(size(feat));
+% %     size(croppedDust{i}, 2)
+%      if (size(croppedDust{i}, 2) < 10)
+%         continue; 
+%      end
+    feat = extractLBPFeatures(croppedDust{i});
+%     theNumber = input('What number is displayed?');
+%     observations = [ observations; feat ];
+%     observationLabels = [observationLabels; theNumber];
+% %     observations(theNumber,:) = feat;
+% %     expected = [ expected; theNumber ];
+% 
+    guessedDigit = knnclassify(feat, observations, observationLabels)
+    stardustStrings = [ stardustStrings num2str(guessedDigit)];
+end
+
+disp(stardustStrings);
+stardust = str2num(stardustStrings);
+
+% assignin('base', 'expected', expected);
+
 % %Find Edit
 % editLocation = template_match(editTemplate, middleThird);
 % editLocation(2) = editLocation(2) + middleRow
 
-% detect_text(middleThird)
-% pause(5);
-
-% edgeImage = edge(middleThird, 'sobel', 0.05);
-
-% slashLocation = template_match(slashTemplate, edgeImage);
-% slashLocation(2) = slashLocation(2) + middleRow
-
-
-
-%Find Strongest horizontal line in the middle of the image
-%(splits the 
-
 %--------------------------  Testing ---------------------------
-%   hFig = figure;
+% hFig = figure;
 %   hAx  = axes;
-%     figure; imshow(cpGeneralRegion);
 %    figure;imshow(cpTextRegion);
-%   hold on;
-%   plot(cpLocation(1),cpLocation(2),'b*');
-%   hold off;
-%    pause(10);
+%    hold on;
+%    plot(cpLocation(1),cpLocation(2),'b*');
+%    hold off;
+%     pause(10);
 
-imwrite(maskedGrayImage, sprintf('mask/gray/maskedImage%d.png', i));
-imwrite(middleThird, sprintf('mask/edge/edge%d.png', i));
-imwrite(maskedRGBImage, sprintf('mask/RGB/maskedImage%d.png', i));
+% imwrite(maskedGrayImage, sprintf('mask/gray/maskedImage%d.png', i));
+% imwrite(imbinarize(middleThird), sprintf('mask/edge/bw%d.png', i));
+% imwrite(maskedRGBImage, sprintf('mask/RGB/maskedImage%d.png', i));
 
 end
 
@@ -144,4 +195,23 @@ function [ position ] = template_match(template, background)
 %         imrect(hAx, [xoffSet+1, yoffSet+1, size(template,2), size(template,1)]);
 %     
     position = [ yoffSet xoffSet ];
+end
+
+function [ croppedCharacters ] = cropCharacters(croppedRegion)
+%     closedRegion = imclose(croppedRegion, strel('square', 7));
+    props = regionprops('table', croppedRegion, 'BoundingBox');
+    boundingBoxes = round(table2array(props));
+    
+%     assignin('base', 'bb', boundingBoxes);
+    
+%     imshow(croppedRegion);
+    croppedCharacters = cell(1, size(props, 1));
+    for charID = 1 : size(props,1)
+%         rectangle('Position', boundingBoxes(charID,:), 'edgecolor', 'red');
+        croppedCharacters{charID} = croppedRegion( ...
+            boundingBoxes(charID,2):boundingBoxes(charID,2)+boundingBoxes(charID,4)-1,  ...
+            boundingBoxes(charID,1):boundingBoxes(charID,1)+boundingBoxes(charID,3)-1 ...
+        );
+    end
+%     pause(5);
 end

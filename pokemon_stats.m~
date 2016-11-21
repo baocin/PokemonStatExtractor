@@ -1,8 +1,11 @@
 
 
-function [ID, CP, HP, stardust, level, cir_center] = pokemon_stats ()
+function [ID, CP, HP, stardust, level, cir_center] = pokemon_stats (img, model)
+
 %img, model
-img = imread('val/
+% img = imread('val/141_CP1215_HP81_SD2500_6026_35.png');
+% model = false;
+
 % Please DO NOT change the interface
 % INPUT: image; model(a struct that contains your classification model, detector, template, etc.)
 % OUTPUT: ID(pokemon id, 1-201); level(the position(x,y) of the white dot in the semi circle); cir_center(the position(x,y) of the center of the semi circle)
@@ -13,66 +16,169 @@ if (isempty(i))
 end
 i = i + 1;
 
-persistent hmi;
-if (isempty(hmi))
-hmi = vision.MarkerInserter('Size', 100, ...
-    'Fill', true, 'FillColor', 'Black', 'Opacity', 1);
-end
-persistent htm;
-if (isempty(htm))
-htm=vision.TemplateMatcher( 'SearchMethod', 'Three-step');
+persistent nums;
+if (isempty(nums))
+   nums = []; 
 end
 
 % Replace these with your code
 ID = 1;
-CP = 123;
-HP = 26;
+CP = 10;
+HP = 40;
 stardust = 600;
 level = [327,165];
 cir_center = [355,457];
 
-maskImage = im2bw(imread('mask.bmp'));
-dustImage = rgb2gray(imread('dust.bmp'));
-editImage = imread('edit.bmp');
+%Resize the input image in order to avoid scale variance
+standardSize = [ 1280 720 ];
+sizeRatio = [ size(img,1)/standardSize(1) size(img,2)/standardSize(2) ];
+img = imresize(img, standardSize);
+
+%Cache the size since it'll be accessed a lot
+inImageSize = size(img);
+
+%Mask over the entire card
+pokeMask = im2bw(imread('mask.bmp'));
+%Template of the dust logo
+dustTemplate= rgb2gray(imread('dust.bmp'));
+%Template of the edit pencil
+editTemplate = rgb2gray(imread('edit.bmp'));
+%Template of the / in the HP
+slashTemplate = imread('slash.bmp');
+%Template of the text "HP"
+hpTemplate = imread('HP.bmp');
+%Template of the text "P" in CP
+cpTemplate = imread('CP.bmp');
 
 %Resize the mask to fit the current image
-inImageSize = size(img);
-% a = size(maskImage)
-maskImage = imresize(maskImage, [ inImageSize(1) inImageSize(2) ]);
-
-
-maskedRGBImage = bsxfun(@times, img, cast(maskImage, 'like', img));
+pokeMask = imresize(pokeMask, [ inImageSize(1) inImageSize(2) ]);
+maskedRGBImage = bsxfun(@times, img, cast(pokeMask, 'like', img));
 maskedGrayImage = rgb2gray(maskedRGBImage);
 
-% Find Dust 
-Loc = step(htm, maskedGrayImage, dustImage)
-level = Loc;
+%Cut the masked Image into sections where specific templates will be found
+oneFourthCol = round(inImageSize(2)/4);
+oneTenthCol = round(inImageSize(2)/10);
+one100thRow = round(inImageSize(1)/100);
+oneThirdRow = round(inImageSize(1)/3);
+oneHalfRow = round(inImageSize(1)/2);
+oneSixthRow = round(inImageSize(1)/6);
 
-[mserRegions] = detectMSERFeatures(maskedGrayImage, ...
-    'RegionAreaRange',[30 100],'ThresholdDelta',12);
+cornerDetectionImage = maskedGrayImage(oneThirdRow:end-oneHalfRow, end-oneTenthCol:end);
+textDetectionImage = maskedGrayImage(:,oneFourthCol:(inImageSize(2)-oneFourthCol));
+
+%--------------------------  Detect CIR_Center ---------------------------
+%Detect Corners (For center of the arc's X value)
+corners = detectHarrisFeatures(cornerDetectionImage);
+cornerPoint = corners.selectStrongest(1).Location;
+cir_center(1) = round(inImageSize(2)/2) * sizeRatio(1);
+cir_center(2) = round(cornerPoint(1) + oneThirdRow - (one100thRow*3)) * sizeRatio(2);
+
+%--------------------------  Detect Dust ---------------------------
+bottomThird = textDetectionImage((oneThirdRow*2):end, :);
+dustLocation = template_match(dustTemplate, bottomThird);
+%Found the dust icon, now get the text region next to it
+dustStartRow = round(dustLocation(1));
+dustEndRow = round(dustLocation(1) + size(dustTemplate,1));
+dustStartCol = round(dustLocation(2) + size(dustTemplate, 2) * 1.2);
+dustEndCol = round(dustLocation(2) + size(dustTemplate,2) + (inImageSize(2) * 0.12));
+dustTextRegion = bottomThird(dustStartRow:dustEndRow, dustStartCol:dustEndCol);
+
+dustTextRegion = imcomplement(imbinarize(dustTextRegion));
+croppedDust= cropCharacters(dustTextRegion);
+
+%--------------------------  Detect HP ---------------------------
+startRow = (cornerPoint(1) + oneThirdRow + (one100thRow * 10));
+endRow = (inImageSize(1)-(oneSixthRow*2) - (one100thRow * 10));
+middleThird = textDetectionImage(startRow:endRow, :);
+hpLocation = template_match(slashTemplate, middleThird);
+%Extract the text region
+hpStartRow = round(hpLocation(1));
+hpEndRow = round(hpLocation(1) + size(slashTemplate,1) * 1.4);
+hpTextRegion = middleThird(hpStartRow:hpEndRow, :);
+
+hpTextRegion = imcomplement(imbinarize(hpTextRegion));
+croppedHP = cropCharacters(hpTextRegion);
+
+%--------------------------  Detect CP ---------------------------
+cpGeneralRegion = textDetectionImage(1:oneSixthRow, :);
+cpLocation = template_match(cpTemplate, cpGeneralRegion);
+cpStartRow = cpLocation(1) - (one100thRow * 2);
+cpEndRow = cpStartRow + (one100thRow * 6);
+cpStartCol = cpLocation(2) + size(cpTemplate,2) * 1.2;
+cpEndCol = cpStartCol + oneTenthCol*2.5;
+cpTextRegion = cpGeneralRegion(cpStartRow:cpEndRow, cpStartCol:cpEndCol);
+
+cpTextRegion = imbinarize(cpTextRegion);
+croppedCP = cropCharacters(cpTextRegion);
 
 
-figure
-imshow(maskedGrayImage)
-hold on
-plot(mserRegions, 'showPixelList', true,'showEllipses',false)
-title('MSER regions')
-hold off
-savefig('mask/figs/im.fig');
+for i = 1 : size(croppedDust, 2)
+    exampleNumber = size(nums, 1) + 1
+    if (isempty(nums{exampleNumber,1}))
+        imshow(croppedDust{i});
+        nums{exampleNumber,1} = feature_extraction(croppedDust{i})%[ nums.examples; feature_extraction(croppedDust{i}) ];
+        theNumber = input('What number is displayed?');
+        nums{exampleNumber,2} = theNumber;
+    end
+    
+   
+%     assignin('base','ex', croppedDust{i});
+    
+    
+end
 
-% J = step(hmi, maskedImage, Loc);
+assignin('base', 'nums', nums);
 
-% level = C;
-% C = xcorr2(single(maskedRGBImage), single(dustImage))
+% %Find Edit
+% editLocation = template_match(editTemplate, middleThird);
+% editLocation(2) = editLocation(2) + middleRow
 
-imwrite(maskedGrayImage, sprintf('mask/gray/maskedImage%d.png', i));
-imwrite(maskedRGBImage, sprintf('mask/RGB/maskedImage%d.png', i));
+%--------------------------  Testing ---------------------------
+% hFig = figure;
+%   hAx  = axes;
+%    figure;imshow(cpTextRegion);
+%    hold on;
+%    plot(cpLocation(1),cpLocation(2),'b*');
+%    hold off;
+%     pause(10);
 
-% imshow(maskedRGBImage); title('Template');
-% figure; imshow(J); title('Marked target');
-
-% exit()
+% imwrite(maskedGrayImage, sprintf('mask/gray/maskedImage%d.png', i));
+% imwrite(imbinarize(middleThird), sprintf('mask/edge/bw%d.png', i));
+% imwrite(maskedRGBImage, sprintf('mask/RGB/maskedImage%d.png', i));
 
 end
 
 
+function [ position ] = template_match(template, background)
+    correlation = normxcorr2(template, background);
+%     figure, surf(correlation), shading flat
+    [ypeak, xpeak] = find(correlation==max(correlation(:)));
+    yoffSet = ypeak-size(template,1);
+    xoffSet = xpeak-size(template,2);
+    
+%        hFig = figure;
+%        hAx  = axes;
+%        imshow(background,'Parent', hAx);
+%         imrect(hAx, [xoffSet+1, yoffSet+1, size(template,2), size(template,1)]);
+%     
+    position = [ yoffSet xoffSet ];
+end
+
+function [ croppedCharacters ] = cropCharacters(croppedRegion)
+%     closedRegion = imclose(croppedRegion, strel('square', 7));
+    props = regionprops('table', croppedRegion, 'BoundingBox');
+    boundingBoxes = round(table2array(props));
+    
+%     assignin('base', 'bb', boundingBoxes);
+    
+%     imshow(croppedRegion);
+    croppedCharacters = cell(1, size(props, 1));
+    for charID = 1 : size(props,1)
+%         rectangle('Position', boundingBoxes(charID,:), 'edgecolor', 'red');
+        croppedCharacters{charID} = croppedRegion( ...
+            boundingBoxes(charID,2):boundingBoxes(charID,2)+boundingBoxes(charID,4)-1,  ...
+            boundingBoxes(charID,1):boundingBoxes(charID,1)+boundingBoxes(charID,3)-1 ...
+        );
+    end
+%     pause(5);
+end

@@ -18,7 +18,7 @@ CP = zeros(img_num,1);
 HP = zeros(img_num,1);
 stardust = zeros(img_num,1);
 
-for i = 1:img_num
+for i = 1:1%img_num
     
     close all;
     
