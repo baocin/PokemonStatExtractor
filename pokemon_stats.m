@@ -1,5 +1,7 @@
 function [ID, CP, HP, stardust, level, cir_center] = pokemon_stats (img, model)
 
+warning off;
+
 %img, model
 % img = imread('val/141_CP1215_HP81_SD2500_6026_35.png');
 % model = false;
@@ -17,7 +19,6 @@ i = i + 1;
 load('observationLabels.mat');
 load('observations.mat');
 
-
 assignin('base', 'observations', observations);
 assignin('base', 'observationLabels', observationLabels);
 % 
@@ -34,10 +35,15 @@ assignin('base', 'observationLabels', observationLabels);
 % end
 
 % Replace these with your code
-ID = 1;
-CP = 10;
-HP = 40;
-stardust = 600;
+IDDefault = 1;
+CPDefault = 10;
+HPDefault = 40;
+stardustDefault = 600;
+
+ID = IDDefault;
+CP = CPDefault;
+HP = HPDefault;
+stardust = stardustDefault;
 level = [327,165];
 cir_center = [355,457];
 
@@ -45,6 +51,7 @@ cir_center = [355,457];
 standardSize = [ 1280 720 ];
 sizeRatio = [ size(img,1)/standardSize(1) size(img,2)/standardSize(2) ];
 img = imresize(img, standardSize);
+peakResponseThreshold = 0.70;
 
 %Cache the size since it'll be accessed a lot
 inImageSize = size(img);
@@ -65,6 +72,8 @@ cpTemplate = imread('CP.bmp');
 %Resize the mask to fit the current image
 pokeMask = imresize(pokeMask, [ inImageSize(1) inImageSize(2) ]);
 maskedRGBImage = bsxfun(@times, img, cast(pokeMask, 'like', img));
+% figure; imshow(maskedRGBImage);
+
 maskedGrayImage = rgb2gray(maskedRGBImage);
 
 %Cut the masked Image into sections where specific templates will be found
@@ -86,79 +95,141 @@ cir_center(1) = round(inImageSize(2)/2) * sizeRatio(1);
 cir_center(2) = round(cornerPoint(1) + oneThirdRow - (one100thRow*3)) * sizeRatio(2);
 
 %--------------------------  Detect Dust ---------------------------
-bottomThird = textDetectionImage((oneThirdRow*2):end, :);
-dustLocation = template_match(dustTemplate, bottomThird);
-%Found the dust icon, now get the text region next to it
-dustStartRow = round(dustLocation(1));
-dustEndRow = round(dustLocation(1) + size(dustTemplate,1));
-dustStartCol = round(dustLocation(2) + size(dustTemplate, 2) * 1.2);
-dustEndCol = round(dustLocation(2) + size(dustTemplate,2) + (inImageSize(2) * 0.12));
-dustTextRegion = bottomThird(dustStartRow:dustEndRow, dustStartCol:dustEndCol);
+try
+    % Crop to the very general area where the text appears
+    bottomThird = textDetectionImage((oneThirdRow*2):end, :);
+    
+    %Template Match to get a point as a frame of reference
+    [ dustLocation peakResponse ] = template_match(dustTemplate, bottomThird);
+%     disp([ 'Peak Response:' num2str(peakResponse) ]);
+    if (peakResponse > peakResponseThreshold )
+        %Found the dust icon, now get the text region next to it
+        dustStartRow = round(dustLocation(1));
+        dustEndRow = round(dustLocation(1) + size(dustTemplate,1));
+        dustStartCol = round(dustLocation(2) + size(dustTemplate, 2) * 1.2);
+        dustEndCol = round(dustLocation(2) + size(dustTemplate,2) + (inImageSize(2) * 0.12));
+        dustTextRegion = bottomThird(dustStartRow:dustEndRow, dustStartCol:dustEndCol);
 
+        %Process the cropped text region for recognition
+        dustTextRegion = imcomplement(dustTextRegion);
+        dustTextRegion = imbinarize(dustTextRegion);
 
-figure; imshow(dustTextRegion);
-dustTextRegion = imcomplement(dustTextRegion);
+        %Find the rectangle bounding box of every digit character 
+        croppedDust= cropCharacters(dustTextRegion);
 
-dustTextRegion = imbinarize(dustTextRegion);
-
-figure; imshow(dustTextRegion);
-croppedDust= cropCharacters(dustTextRegion);
-
-%--------------------------  Detect HP ---------------------------
-startRow = (cornerPoint(1) + oneThirdRow + (one100thRow * 10));
-endRow = (inImageSize(1)-(oneSixthRow*2) - (one100thRow * 10));
-middleThird = textDetectionImage(startRow:endRow, :);
-hpLocation = template_match(slashTemplate, middleThird);
-%Extract the text region
-hpStartRow = round(hpLocation(1));
-hpEndRow = round(hpLocation(1) + size(slashTemplate,1) * 1.4);
-hpTextRegion = middleThird(hpStartRow:hpEndRow, :);
-
-hpTextRegion = imcomplement(imbinarize(hpTextRegion));
-croppedHP = cropCharacters(hpTextRegion);
-
-%--------------------------  Detect CP ---------------------------
-cpGeneralRegion = textDetectionImage(1:oneSixthRow, :);
-cpLocation = template_match(cpTemplate, cpGeneralRegion);
-cpStartRow = cpLocation(1) - (one100thRow * 2);
-cpEndRow = cpStartRow + (one100thRow * 6);
-cpStartCol = cpLocation(2) + size(cpTemplate,2) * 1.2;
-cpEndCol = cpStartCol + oneTenthCol*2.5;
-cpTextRegion = cpGeneralRegion(cpStartRow:cpEndRow, cpStartCol:cpEndCol);
-
-cpTextRegion = imbinarize(cpTextRegion);
-croppedCP = cropCharacters(cpTextRegion);
-
-% stardust = 0;
-stardustStrings = [];
-% disp(size(croppedDust, 2))
-for i = 1 : size(croppedDust, 2)
-% %     exampleNumber = size(observations, 1) + 1
-%    figure; imshow(croppedDust{i});
-% %    ws = watershed(croppedDust{i});
-% %    figure; 
-% % %    pause(1);
-% % %    close all;
-% % %     assignin('base','ex', croppedDust{i});
-%     feat = feature_extraction(croppedDust{i}); %[ nums.examples; feature_extraction(croppedDust{i}) ];
-%     disp(size(feat));
-% %     size(croppedDust{i}, 2)
-%      if (size(croppedDust{i}, 2) < 10)
-%         continue; 
-%      end
-    feat = extractLBPFeatures(croppedDust{i});
-%     theNumber = input('What number is displayed?');
-%     observations = [ observations; feat ];
-%     observationLabels = [observationLabels; theNumber];
-% %     observations(theNumber,:) = feat;
-% %     expected = [ expected; theNumber ];
-% 
-    guessedDigit = knnclassify(feat, observations, observationLabels)
-    stardustStrings = [ stardustStrings num2str(guessedDigit)];
+        %Now detect the digits
+        try
+            cpStrings = [];
+            for i = 1 : size(croppedDust, 2)
+                feat = extractLBPFeatures(croppedDust{i});
+                guessedDigit = knnclassify(feat, observations, observationLabels);
+                cpStrings = [ cpStrings num2str(guessedDigit)];
+            end
+            stardust = str2num(cpStrings);
+        catch E
+%             disp('Used Default startdust');
+            stardust = stardustDefault;
+        end
+    else
+%         disp('Invalid Template Match Position, typically happens if image is very small 175x288.');
+%        disp('Very weak template match - using default startdust value');
+       stardust = stardustDefault;
+    end
+catch E
+%    disp('Very weak template match - using default startdust value');
+   stardust = stardustDefault;
 end
 
-disp(stardustStrings);
-stardust = str2num(stardustStrings);
+disp([ 'StarDust:' num2str(stardust) ]);
+
+
+%--------------------------  Detect HP ---------------------------
+try
+	startRow = (cornerPoint(1) + oneThirdRow + (one100thRow * 10));
+	endRow = (inImageSize(1)-(oneSixthRow*2) - (one100thRow * 10));
+	middleThird = textDetectionImage(startRow:endRow, :);
+	[ hpLocation peakResponse ] = template_match(slashTemplate, middleThird);
+	
+    if (peakResponse > peakResponseThreshold)
+		%Extract the text region
+		hpStartRow = round(hpLocation(1));
+		hpEndRow = round(hpLocation(1) + size(slashTemplate,1) * 1.4);
+		hpTextRegion = middleThird(hpStartRow:hpEndRow, :);
+
+        %Process the cropped text region for recognition
+        hpTextRegion = imcomplement(imbinarize(hpTextRegion));
+		croppedHP = cropCharacters(hpTextRegion);
+        
+        %Now detect the digits
+        try
+            HPStrings = [];
+            for i = 1 : size(croppedHP, 2)
+                feat = extractLBPFeatures(croppedHP{i});
+                guessedDigit = knnclassify(feat, observations, observationLabels);
+                HPStrings = [ HPStrings num2str(guessedDigit)];
+            end
+            HP = str2num(HPStrings);
+        catch E
+%             disp('Used Default HP');
+            HP =HPDefault;
+        end
+    else
+%         disp('Very weak template match - using default HP value');
+        HP = HPDefault;
+    end
+catch E
+%    disp('Very weak template match - using default HP value');
+    HP = HPDefault;
+end
+
+disp([ 'HP:' num2str(HP) ]);
+
+
+%--------------------------  Detect CP ---------------------------
+try
+    cpGeneralRegion = textDetectionImage(1:oneSixthRow, :);
+    % figure; imshow(cpGeneralRegion);
+    [ cpLocation peakResponse ] = template_match(cpTemplate, cpGeneralRegion);
+
+    if (peakResponse > peakResponseThreshold)
+        cpStartRow = cpLocation(1) - (one100thRow * 2);
+        cpEndRow = cpStartRow + (one100thRow * 6);
+        cpStartCol = cpLocation(2) + size(cpTemplate,2) * 1.2;
+        cpEndCol = cpStartCol + oneTenthCol*2.5;
+        cpTextRegion = cpGeneralRegion(cpStartRow:cpEndRow, cpStartCol:cpEndCol);
+
+        %Process the cropped text region for recognition
+        cpTextRegion = imbinarize(cpTextRegion);
+        croppedCP = cropCharacters(cpTextRegion);
+        
+        %Now detect the digits
+        try
+            cpStrings = [];
+            for i = 1 : size(croppedCP, 2)
+                feat = extractLBPFeatures(croppedCP{i});
+                guessedDigit = knnclassify(feat, observations, observationLabels);
+                cpStrings = [ cpStrings num2str(guessedDigit)];
+            end
+            CP = str2num(cpStrings);
+        catch E
+%             disp('Used Default CP');
+            CP =CPDefault;
+        end
+    else
+%         disp('Very weak template match - using default cp value');
+        CP = CPDefault;
+    end
+catch E
+%    disp('Very weak template match - using default cp value');
+    CP = CPDefault;
+end
+
+disp([ 'CP:' num2str(CP) ]);
+
+
+
+fprintf('\n');
+
 
 % assignin('base', 'expected', expected);
 
@@ -182,7 +253,7 @@ stardust = str2num(stardustStrings);
 end
 
 
-function [ position ] = template_match(template, background)
+function [ position, response] = template_match(template, background)
     correlation = normxcorr2(template, background);
 %     figure, surf(correlation), shading flat
     [ypeak, xpeak] = find(correlation==max(correlation(:)));
@@ -194,6 +265,13 @@ function [ position ] = template_match(template, background)
 %        imshow(background,'Parent', hAx);
 %         imrect(hAx, [xoffSet+1, yoffSet+1, size(template,2), size(template,1)]);
 %     
+
+    %TODO: Make confidence value by 
+        % 1) calculating the average of the top 100 largest peaks
+        % 2) getting the value of the maximum response peak
+        % if less than 20% difference then consider it noise?
+        
+    response = correlation(ypeak,xpeak);
     position = [ yoffSet xoffSet ];
 end
 

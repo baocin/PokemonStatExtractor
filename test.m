@@ -18,11 +18,12 @@ CP = zeros(img_num,1);
 HP = zeros(img_num,1);
 stardust = zeros(img_num,1);
 
-for i = 1:1%img_num
+for i = 48:img_num
     
     close all;
     
     img = imread([img_path,img_dir(i).name]);
+%     figure; imshow(img);
     
     % get ground truth annotation from image name
     name = img_dir(i).name;
