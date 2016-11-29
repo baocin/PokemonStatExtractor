@@ -10,17 +10,31 @@ warning off;
 % INPUT: image; model(a struct that contains your classification model, detector, template, etc.)
 % OUTPUT: ID(pokemon id, 1-201); level(the position(x,y) of the white dot in the semi circle); cir_center(the position(x,y) of the center of the semi circle)
 
-persistent i;
-if (isempty(i))
-    i = 0;
+persistent imgNum;
+if (isempty(imgNum))
+    imgNum = 0;
 end
-i = i + 1;
+imgNum = imgNum + 1;
 
-load('observationLabels.mat');
-load('observations.mat');
+assignin('base','model', model);
 
-assignin('base', 'observations', observations);
-assignin('base', 'observationLabels', observationLabels);
+% % trainCPDigits = 
+% load('trainCPDigits.mat');
+% % trainSDDigits = 
+% load('trainSDDigits.mat');
+% % trainHPDigits = 
+% load('trainHPDigits.mat');
+% 
+% assignin('base', 'trainCPDigits', trainCPDigits);
+% assignin('base', 'trainSDDigits', trainSDDigits);
+% assignin('base', 'trainHPDigits', trainHPDigits);
+% %assignin('base', 'trainID', trainID);
+% 
+% load('observationLabels.mat');
+% load('observations.mat');
+% 
+% assignin('base', 'observations', observations);
+% assignin('base', 'observationLabels', observationLabels);
 % 
 % persistent observations;
 % persistent observationLabels;
@@ -35,15 +49,12 @@ assignin('base', 'observationLabels', observationLabels);
 % end
 
 % Replace these with your code
-IDDefault = 1;
-CPDefault = 10;
-HPDefault = 40;
-stardustDefault = 600;
 
-ID = IDDefault;
-CP = CPDefault;
-HP = HPDefault;
-stardust = stardustDefault;
+
+ID = model.defaultID;
+CP = model.defaultCP;
+HP = model.defaultHP;
+stardust = model.defaultSD;
 level = [327,165];
 cir_center = [355,457];
 
@@ -56,25 +67,14 @@ peakResponseThreshold = 0.70;
 %Cache the size since it'll be accessed a lot
 inImageSize = size(img);
 
-%Mask over the entire card
-pokeMask = im2bw(imread('mask.bmp'));
-%Template of the dust logo
-dustTemplate= rgb2gray(imread('dust.bmp'));
-%Template of the edit pencil
-editTemplate = rgb2gray(imread('edit.bmp'));
-%Template of the / in the HP
-slashTemplate = imread('slash.bmp');
-%Template of the text "HP"
-hpTemplate = imread('HP.bmp');
-%Template of the text "P" in CP
-cpTemplate = imread('CP.bmp');
-
 %Resize the mask to fit the current image
-pokeMask = imresize(pokeMask, [ inImageSize(1) inImageSize(2) ]);
-maskedRGBImage = bsxfun(@times, img, cast(pokeMask, 'like', img));
-% figure; imshow(maskedRGBImage);
-
-maskedGrayImage = rgb2gray(maskedRGBImage);
+model.pokeMask = imresize(model.pokeMask, [ inImageSize(1) inImageSize(2) ]);
+maskedRGBImage = bsxfun(@times, img, cast(model.pokeMask, 'like', img));
+try
+    maskedGrayImage = rgb2gray(maskedRGBImage);
+catch E
+   return; 
+end
 
 %Cut the masked Image into sections where specific templates will be found
 oneFourthCol = round(inImageSize(2)/4);
@@ -86,7 +86,9 @@ oneSixthRow = round(inImageSize(1)/6);
 
 cornerDetectionImage = maskedGrayImage(oneThirdRow:end-oneHalfRow, end-oneTenthCol:end);
 textDetectionImage = maskedGrayImage(:,oneFourthCol:(inImageSize(2)-oneFourthCol));
-
+pokeDetectionImage = maskedGrayImage((one100thRow * 15):(oneHalfRow-(one100thRow*5)), ...
+        (oneTenthCol*2):(end-(oneTenthCol*2)));
+    
 %--------------------------  Detect CIR_Center ---------------------------
 %Detect Corners (For center of the arc's X value)
 corners = detectHarrisFeatures(cornerDetectionImage);
@@ -100,14 +102,14 @@ try
     bottomThird = textDetectionImage((oneThirdRow*2):end, :);
     
     %Template Match to get a point as a frame of reference
-    [ dustLocation peakResponse ] = template_match(dustTemplate, bottomThird);
+    [ dustLocation peakResponse ] = template_match(model.dustTemplate, bottomThird);
 %     disp([ 'Peak Response:' num2str(peakResponse) ]);
     if (peakResponse > peakResponseThreshold )
         %Found the dust icon, now get the text region next to it
         dustStartRow = round(dustLocation(1));
-        dustEndRow = round(dustLocation(1) + size(dustTemplate,1));
-        dustStartCol = round(dustLocation(2) + size(dustTemplate, 2) * 1.2);
-        dustEndCol = round(dustLocation(2) + size(dustTemplate,2) + (inImageSize(2) * 0.12));
+        dustEndRow = round(dustLocation(1) + size(model.dustTemplate,1));
+        dustStartCol = round(dustLocation(2) + size(model.dustTemplate, 2) * 1.2);
+        dustEndCol = round(dustLocation(2) + size(model.dustTemplate,2) + (inImageSize(2) * 0.12));
         dustTextRegion = bottomThird(dustStartRow:dustEndRow, dustStartCol:dustEndCol);
 
         %Process the cropped text region for recognition
@@ -119,82 +121,130 @@ try
 
         %Now detect the digits
         try
-            cpStrings = [];
+            sdStrings = [];
             for i = 1 : size(croppedDust, 2)
-                feat = extractLBPFeatures(croppedDust{i});
-                guessedDigit = knnclassify(feat, observations, observationLabels);
-                cpStrings = [ cpStrings num2str(guessedDigit)];
+                
+%                disp(sprintf('Loop #%d',i));
+%                figure; imshow(croppedDust{i});
+               img = imresize(croppedDust{i}, [ 21 14 ]); 
+%                img = padarray(img, [ 5 5 ]);
+               feat = extractHOGFeatures(img, 'CellSize', [2 2]);
+               guessedDigit = predict(model.CPclassifier, feat);
+%              guessedDigit = knnclassify(feat, cell2mat(trainSDDigits(:,2)), cell2mat(trainSDDigits(:,1)), 5);
+               sdStrings = [ sdStrings num2str(guessedDigit)];
+                
             end
-            stardust = str2num(cpStrings);
+            stardust = str2num(sdStrings);
         catch E
-%             disp('Used Default startdust');
-            stardust = stardustDefault;
-        end
-    else
-%         disp('Invalid Template Match Position, typically happens if image is very small 175x288.');
-%        disp('Very weak template match - using default startdust value');
-       stardust = stardustDefault;
-    end
+             disp('Used Default startdust');
+             stardust = model.defaultSD;
+         end
+%     else
+% %         disp('Invalid Template Match Position, typically happens if image is very small 175x288.');
+% %        disp('Very weak template match - using default startdust value');
+%        stardust = stardustDefault;
+     end
 catch E
 %    disp('Very weak template match - using default startdust value');
-   stardust = stardustDefault;
+   stardust = model.defaultSD;
 end
 
 disp([ 'StarDust:' num2str(stardust) ]);
 
 
 %--------------------------  Detect HP ---------------------------
-try
+ try
 	startRow = (cornerPoint(1) + oneThirdRow + (one100thRow * 10));
 	endRow = (inImageSize(1)-(oneSixthRow*2) - (one100thRow * 10));
 	middleThird = textDetectionImage(startRow:endRow, :);
-	[ hpLocation peakResponse ] = template_match(slashTemplate, middleThird);
+	[ hpLocation peakResponse ] = template_match(model.slashWhiteTemplate, middleThird);
 	
-    if (peakResponse > peakResponseThreshold)
+%     if (peakResponse > peakResponseThreshold)
 		%Extract the text region
-		hpStartRow = round(hpLocation(1));
-		hpEndRow = round(hpLocation(1) + size(slashTemplate,1) * 1.4);
-		hpTextRegion = middleThird(hpStartRow:hpEndRow, :);
+		hpStartRow = round(hpLocation(1))
+        hpEndRow = min(floor(hpLocation(1) + size(model.slashWhiteTemplate,1) * 1.4), size(middleThird,1))
+%             size(middleThird)
+        hpTextRegion = middleThird(hpStartRow:hpEndRow, :);
 
         %Process the cropped text region for recognition
         hpTextRegion = imcomplement(imbinarize(hpTextRegion));
-		croppedHP = cropCharacters(hpTextRegion);
+		[ croppedHP, bb ]= cropCharacters(hpTextRegion);
         
         %Now detect the digits
-        try
+%         try
             HPStrings = [];
-            for i = 1 : size(croppedHP, 2)
-                feat = extractLBPFeatures(croppedHP{i});
-                guessedDigit = knnclassify(feat, observations, observationLabels);
-                HPStrings = [ HPStrings num2str(guessedDigit)];
+            
+            numDigitsInHPValue = (size(croppedHP, 2) - 2 -1 ) / 2;
+            
+            centerColumn = size(hpTextRegion,2)/2;
+            [ SLocation peakResponse ] = template_match(model.slashBinaryTemplate, hpTextRegion);
+            
+            disp(SLocation(1,2));
+            
+            slashIndex = 1;
+            for bIndex = 1 : size(bb,1)
+                disp(sprintf('Checking if slash coordinate is in bb #%d', bIndex));
+                [ x y ] = bbCorners(bb(bIndex, 1:2), bb(bIndex,3:4));
+                in = inpolygon(SLocation(2) + size(model.slashBinaryTemplate,2)/2, SLocation(1) + size(model.slashBinaryTemplate,1)/2, x, y);
+                if (in == 1)
+                    slashIndex = bIndex
+%                     figure; imshow(croppedHP{slashIndex});
+%                     input('sdklfj');
+                end
+            end
+            
+            hpStartDigit = slashIndex + 1;
+%             if (SLocation(1,2) < centerColumn)
+%                %HP is to the right of the value
+%                
+%                 %HP to the left of the values
+%                 hpStartDigit = 4
+%             end
+            
+            hpEndDigit = hpStartDigit + numDigitsInHPValue - 1;
+            for i = hpStartDigit : hpEndDigit
+               disp(sprintf('Loop #%d',i));
+%                imwrite(croppedHP{i}, sprintf('hp/%d.png', i));
+               
+               img = imresize(croppedHP{i}, [ 21 14 ]); 
+%                img = padarray(img, [ 5 5 ]);
+%                figure; imshow(croppedHP{i});
+%                figure; imshow(img);
+               feat = extractHOGFeatures(img, 'CellSize', [2 2]);
+           
+               guessedDigit = predict(model.HPclassifier, feat);
+%              guessedDigit = knnclassify(feat, cell2mat(trainSDDigits(:,2)), cell2mat(trainSDDigits(:,1)), 5);
+               HPStrings = [ HPStrings num2str(guessedDigit)];
+               
+               
             end
             HP = str2num(HPStrings);
-        catch E
-%             disp('Used Default HP');
-            HP =HPDefault;
-        end
-    else
+%         catch E
+% % %             disp('Used Default HP');
+%             HP =model.defaultHP;
+%         end
+    %else
 %         disp('Very weak template match - using default HP value');
-        HP = HPDefault;
-    end
-catch E
-%    disp('Very weak template match - using default HP value');
-    HP = HPDefault;
-end
+        %HP = HPDefault;
+%     end
+ catch E
+% % %    disp('Very weak template match - using default HP value');
+     HP = model.defaultHP;
+ end
 
 disp([ 'HP:' num2str(HP) ]);
-
+% input('waiting for input');
 
 %--------------------------  Detect CP ---------------------------
 try
     cpGeneralRegion = textDetectionImage(1:oneSixthRow, :);
     % figure; imshow(cpGeneralRegion);
-    [ cpLocation peakResponse ] = template_match(cpTemplate, cpGeneralRegion);
+    [ cpLocation peakResponse ] = template_match(model.cpTemplate, cpGeneralRegion);
 
     if (peakResponse > peakResponseThreshold)
         cpStartRow = cpLocation(1) - (one100thRow * 2);
         cpEndRow = cpStartRow + (one100thRow * 6);
-        cpStartCol = cpLocation(2) + size(cpTemplate,2) * 1.2;
+        cpStartCol = cpLocation(2) + size(model.cpTemplate,2) * 1.2;
         cpEndCol = cpStartCol + oneTenthCol*2.5;
         cpTextRegion = cpGeneralRegion(cpStartRow:cpEndRow, cpStartCol:cpEndCol);
 
@@ -206,22 +256,27 @@ try
         try
             cpStrings = [];
             for i = 1 : size(croppedCP, 2)
-                feat = extractLBPFeatures(croppedCP{i});
-                guessedDigit = knnclassify(feat, observations, observationLabels);
-                cpStrings = [ cpStrings num2str(guessedDigit)];
+%                disp(sprintf('Loop #%d',i));
+%                figure; imshow(croppedCP{i});
+               img = imresize(croppedCP{i}, [ 21 14 ]); 
+%                img = padarray(img, [ 5 5 ]);
+               feat = extractHOGFeatures(img, 'CellSize', [2 2]);
+               guessedDigit = predict(model.CPclassifier, feat);
+%              guessedDigit = knnclassify(feat, cell2mat(trainSDDigits(:,2)), cell2mat(trainSDDigits(:,1)), 5);
+               cpStrings = [ cpStrings num2str(guessedDigit)];
             end
             CP = str2num(cpStrings);
         catch E
 %             disp('Used Default CP');
-            CP =CPDefault;
+            CP =model.defaultCP;
         end
-    else
+%     else
 %         disp('Very weak template match - using default cp value');
-        CP = CPDefault;
+%         CP = model.defaultCP;
     end
 catch E
 %    disp('Very weak template match - using default cp value');
-    CP = CPDefault;
+    CP = model.defaultCP;
 end
 
 disp([ 'CP:' num2str(CP) ]);
@@ -229,13 +284,6 @@ disp([ 'CP:' num2str(CP) ]);
 
 
 fprintf('\n');
-
-
-% assignin('base', 'expected', expected);
-
-% %Find Edit
-% editLocation = template_match(editTemplate, middleThird);
-% editLocation(2) = editLocation(2) + middleRow
 
 %--------------------------  Testing ---------------------------
 % hFig = figure;
@@ -275,7 +323,7 @@ function [ position, response] = template_match(template, background)
     position = [ yoffSet xoffSet ];
 end
 
-function [ croppedCharacters ] = cropCharacters(croppedRegion)
+function [ croppedCharacters boundingBoxes ] = cropCharacters(croppedRegion)
 %     closedRegion = imclose(croppedRegion, strel('square', 7));
     props = regionprops('table', croppedRegion, 'BoundingBox');
     boundingBoxes = round(table2array(props));
@@ -292,4 +340,25 @@ function [ croppedCharacters ] = cropCharacters(croppedRegion)
         );
     end
 %     pause(5);
+end
+
+function [ xCoords yCoords ] = bbCorners(bbTopLeftCorner, bbWidth)
+    %top left
+    xCoords(1) = bbTopLeftCorner(1,1);
+    yCoords(1) = bbTopLeftCorner(1,2);
+    
+    %top right
+    xCoords(2) = bbTopLeftCorner(1,1) + bbWidth(1,2);
+    yCoords(2) = bbTopLeftCorner(1,2);
+    
+    %bottom right
+    xCoords(3) = bbTopLeftCorner(1,1) + bbWidth(1,2);
+    yCoords(3) = bbTopLeftCorner(1,2) + bbWidth(1,1);
+    
+    %bottom left
+    xCoords(4) = bbTopLeftCorner(1,1);
+    yCoords(4) = bbTopLeftCorner(1,2) + bbWidth(1,1);
+    
+    
+    
 end
